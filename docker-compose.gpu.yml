@@ -1,0 +1,84 @@
+version: "3.8"
+
+services:
+  celery_worker:
+    build:
+      context: .
+      args:
+        CPU_ONLY: "false"
+    image: converter-gpu-image
+    command: poetry run celery -A worker.celery_config worker --pool=solo -n worker_primary --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - ENV=production
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis
+
+  app:
+    container_name: marker-api-gpu
+    build:
+      context: .
+      args:
+        CPU_ONLY: "false"
+    image: converter-gpu-image
+    command: poetry run uvicorn --port 8080 --host 0.0.0.0 main:app
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - ENV=production
+      - NVIDIA_VISIBLE_DEVICES=all
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis
+      - celery_worker
+
+  redis:
+    container_name: redis
+    image: redis:7.2.4-alpine
+    ports:
+      - "6379:6379"
+
+  flower:
+    container_name: flower_gpu
+    build:
+      context: .
+      args:
+        CPU_ONLY: "false"
+    image: converter-gpu-image
+    command: poetry run celery -A worker.celery_config flower --port=5555
+    ports:
+      - "5556:5555"
+    volumes:
+      - .:/app
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - ENV=production
+    depends_on:
+      - app
+      - redis
+      - celery_worker
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
